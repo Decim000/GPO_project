@@ -61,29 +61,31 @@ async def get_info_from_each_header(header):
     data = [num, placed.text, end_date.text, link ]
     doc_page = url_base + link
    
-    r = None
-    while r is None:
-        r = await asyncio.gather(get_html_async(doc_page))
-    soup = BeautifulSoup(r[0], 'html.parser')
+    
+    r = await asyncio.gather(get_html_async(doc_page))
 
-    attachments = soup.find("div", {"class":"blockFilesTabDocs"})
-    if attachments is None:
-        print(data)
-        return data
+    if r is not None:
+        
+        soup = BeautifulSoup(r[0], 'html.parser')
 
-    else:
-        all_attachments = attachments.find_all("div", {"class": "attachment row"}) 
-        attachments2 = attachments.find_all("div", {"class": "attachment row "}) 
-        attachments3 = attachments.find_all("div", {"class": "attachment row displayNone closedFilesDocs"}) 
-        for att in attachments3:
-            all_attachments.append(att)
-        for att in attachments2:
-            all_attachments.append(att)
+        attachments = soup.find("div", {"class":"blockFilesTabDocs"})
+        if attachments is None:
+            print(data)
+            return data
+
+        else:
+            all_attachments = attachments.find_all("div", {"class": "attachment row"}) 
+            attachments2 = attachments.find_all("div", {"class": "attachment row "}) 
+            attachments3 = attachments.find_all("div", {"class": "attachment row displayNone closedFilesDocs"}) 
+            for att in attachments3:
+                all_attachments.append(att)
+            for att in attachments2:
+                all_attachments.append(att)
         
-        docs_list = await asyncio.gather(*[get_doc(attachment, num) for attachment in all_attachments])
+            docs_list = await asyncio.gather(*[get_doc(attachment, num) for attachment in all_attachments])
         
-        for doc in docs_list:
-            data.append(doc)
+            for doc in docs_list:
+                data.append(doc)
        
     print(data)
     return data
@@ -103,7 +105,6 @@ async def get_html_async(test_url, get_status=False):
             async with session.get(test_url, headers={'User-Agent': 'Custom'}) as response:
                 if not get_status:
                     text = await response.text()
-                    await session.close()
                     return text
                 else:
                     if response.status == 200:
@@ -117,7 +118,6 @@ async def get_html_async(test_url, get_status=False):
                     async with retry_client.get(test_url) as response:
                         if not get_status:
                             text = await response.text()
-                            await retry_client.close()
                             return text
                         else: 
                             if response.status == 200:
