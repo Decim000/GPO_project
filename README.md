@@ -11,5 +11,6 @@ what u will see: (env) <path/to/GPO_project>
 5. cd .. && cd ..
 6. cd parser_gpo
 7. pip install -r requirements.txt (or pip install -r <full/path/to/>requirements.txt )
-7. uvicorn parser_gpo.asgi:application --host=127.0.0.1 --post=7000
+8. python manage.py migrate (if don't have sqlite3 db)
+9. uvicorn parser_gpo.asgi:application --host=127.0.0.1 --post=7000
 now local server is running and ready to test
