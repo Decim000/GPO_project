@@ -1,14 +1,18 @@
 import asyncio
+import unicodedata
 import aiohttp_retry
 import aiofiles
 import aiohttp
 import os
 import json
 
+from .models import Tender
 from aiohttp import ClientConnectorError, ClientConnectionError
 from django.http import JsonResponse
 from http import HTTPStatus
 from bs4 import BeautifulSoup
+from asgiref.sync import sync_to_async
+from datetime import datetime
 
 
 
@@ -21,7 +25,7 @@ async def download_async(title, number, href):
     destination_file = destination_folder + "/{}".format(title)
 
     if not os.path.exists(destination_file):
-        r = await asyncio.gather(get_html_async(href, True))
+        r = await asyncio.gather(get_bytes_payload_async(href))
         r=r[0]
 
         if r:
@@ -32,7 +36,6 @@ async def download_async(title, number, href):
 
 
 async def get_doc(attachment_element, num):
-
     attachment_element = attachment_element.find("span", {"class": "section__value"}) 
     attachment_element = attachment_element.find_next('a')
     doc_name = attachment_element['title']
@@ -44,12 +47,33 @@ async def get_doc(attachment_element, num):
     return doc_name
    
 
-async def get_info_from_each_header(header):
+async def save_tender_info_to_db(data:list):
+    try:
+        tender = await Tender.objects.aget(number=int(data[0]))
+    except Tender.DoesNotExist:
+        start_date = datetime.strptime(data[1], "%d.%m.%Y").date()
+        end_date = datetime.strptime(data[2], "%d.%m.%Y").date()
+        tender = await Tender.objects.acreate(number=int(data[0]), placement_date=start_date, end_date=end_date, name=data[3], price=float(data[5]))
 
+    return tender
+
+
+async def get_info_from_each_header(header):
     data = []
     url_base = "https://zakupki.gov.ru"
     num= header.find("div", {"class": "registry-entry__header-mid__number"}) 
     num=num.text.strip()
+    num=num.replace("№ ", "")
+    object_to_buy = header.find("div", {"class": "registry-entry__body-value"}) 
+    object_to_buy = object_to_buy.text
+    customer = header.find("div", {"class": "registry-entry__body-href"}) 
+    customer = customer.find("a")
+    customer = customer.text.strip()
+    price = header.find("div", {"class": "price-block__value"})
+    price = price.text
+    price = unicodedata.normalize("NFKD", price)
+    price = price.replace(",", ".").replace(" ", "")
+    price = price.replace("₽", "").strip()
     placed_prev = header.find(text='Размещено')
     placed = placed_prev.find_next('div')
     end_date_prev = header.find(text='Окончание подачи заявок')
@@ -58,14 +82,14 @@ async def get_info_from_each_header(header):
     docs = docs.find("a", {"target": "_blank"})
     link = docs.get('href')
 
-    data = [num, placed.text, end_date.text, link ]
+    data = [num, placed.text, end_date.text, object_to_buy, customer, price, link ]
     doc_page = url_base + link
-   
     
     r = await asyncio.gather(get_html_async(doc_page))
 
     if r is not None:
         
+        tender_object = await save_tender_info_to_db(data=data)
         soup = BeautifulSoup(r[0], 'html.parser')
 
         attachments = soup.find("div", {"class":"blockFilesTabDocs"})
@@ -88,49 +112,74 @@ async def get_info_from_each_header(header):
                 data.append(doc)
        
     print(data)
-    return data
+    return [data, tender_object]
+    
     
 
 async def get_items_list(page_source):
-
     soup = BeautifulSoup(page_source, 'html.parser')
     coll = soup.find_all("div", {"class": "row no-gutters registry-entry__form mr-0"})
     data_list = await asyncio.gather(*[get_info_from_each_header(header) for header in coll])
     return data_list
     
  
-async def get_html_async(test_url, get_status=False):
-    async with aiohttp.ClientSession(trust_env=True) as session:
+async def get_html_async(test_url):
+    flag_success = False
+    session = aiohttp.ClientSession(trust_env=True)
+    while not flag_success:
         try:
             async with session.get(test_url, headers={'User-Agent': 'Custom'}) as response:
-                if not get_status:
-                    text = await response.text()
-                    return text
-                else:
-                    if response.status == 200:
-                        data = await response.read()
-                        return data
+                text = await response.text()
+                flag_success = True
+                await session.close()
+                return text    
 
         except (ClientConnectorError, ClientConnectionError):
             retry_options = aiohttp_retry.ExponentialRetry(attempts=10)
-            async with aiohttp_retry.RetryClient(session, retry_options=retry_options) as retry_client:
-                try:
-                    async with retry_client.get(test_url) as response:
-                        if not get_status:
-                            text = await response.text()
-                            return text
-                        else: 
-                            if response.status == 200:
-                                data = await response.read()
-                                return data
-                except:
-                    return None
+            retry_client = aiohttp_retry.RetryClient(session, retry_options=retry_options)
+            try:
+                async with retry_client.get(test_url) as response: 
+                    text = await response.text()
+                    flag_success = True
+                    await retry_client.close()
+                    return text
+                    
+            except:
+                return None
+
+        except Exception as e:
+            print(e)
+
+
+async def get_bytes_payload_async(test_url):
+    flag_success = False
+    session = aiohttp.ClientSession(trust_env=True)
+    while not flag_success:
+        try:
+            async with session.get(test_url, headers={'User-Agent': 'Custom'}) as response:
+                if response.status == 200:
+                    data = await response.read()
+                    flag_success = True
+                    await session.close()
+                    return data
+
+        except (ClientConnectorError, ClientConnectionError):
+            retry_options = aiohttp_retry.ExponentialRetry(attempts=10)
+            retry_client = aiohttp_retry.RetryClient(session, retry_options=retry_options)
+            try:
+                async with retry_client.get(test_url) as response:
+                    if response.status == 200:
+                        data = await response.read()
+                        flag_success = True
+                        await retry_client.close()
+                        return data
+            except:
+                return None
         except Exception as e:
             print(e)
 
 
 async def crawler(request):
-
     if request.body:
         body = json.loads(request.body)
         url = await generate_url(body)
@@ -171,7 +220,6 @@ async def crawler(request):
 
 
 async def generate_url(body):
-
     keywords = body.get("search")
     technologies_list = body.get("technologies")
     unwanted_technologies_list = body.get("unwantedTechnologies")
@@ -182,9 +230,11 @@ async def generate_url(body):
 
     basic_url = 'https://zakupki.gov.ru/epz/order/extendedsearch/results.html?'
     search_url='searchString='
-    url_tail = '&morphology=on&pageNumber=1&sortDirection=false&recordsPerPage=_10&showLotsInfoHidden=false&sortBy=UPDATE_DATE'
+    url_tail = '&morphology=on&pageNumber=1&sortDirection=false&recordsPerPage=_10&showLotsInfoHidden=false&sortBy=UPDATE_DATE&currencyIdGeneral=-1'
     law_url = ""
-    resp = None
+    stage_url=""
+    price_url=""
+    date_url=""
         
     keywords = keywords.replace(" ", "+")
     if "44-ФЗ" in law_type_list:
@@ -192,11 +242,25 @@ async def generate_url(body):
     if "223-ФЗ" in law_type_list:
         law_url+="&fz223=on"
     if stage == "Подача заявок":
-        stage_url = "&af=on"
+        stage_url += "&af=on"
 
-    price_url = "&priceFromGeneral=" + str(price_dict.get('minPrice')) + "&priceToGeneral=" +str(price_dict.get('maxPrice'))+"&currencyIdGeneral=-1"
-    date_url = "&publishDateFrom=" + str(date_dict.get('beginDate')) + "&applSubmissionCloseDateFrom=" +str(date_dict.get('endDate'))
-    generated_url = basic_url + search_url + keywords + url_tail + law_url + stage_url+ price_url + date_url
+    min_price=price_dict.get('minPrice')
+    if min_price is not None:
+        price_url+="&priceFromGeneral=" + str(min_price)
+
+    max_price=price_dict.get('maxPrice')
+    if max_price != 0:
+        price_url+="&priceToGeneral=" + str(max_price)
+    
+    start_date=date_dict.get('beginDate')
+    if start_date != "":
+        date_url+="&publishDateFrom=" + str(start_date)
+
+    end_date=date_dict.get('endDate')
+    if end_date != "":
+        date_url+="&applSubmissionCloseDateFrom=" + str(end_date)
+
+    generated_url = basic_url + search_url + keywords + url_tail + law_url + stage_url+ price_url + date_url 
 
     return generated_url
 
