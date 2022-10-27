@@ -47,13 +47,13 @@ async def get_doc(attachment_element, num):
     return doc_name
    
 
-async def save_tender_info_to_db(data:list):
+async def save_tender_info_to_db(number=None, placed=None, end_date=None, object_to_buy=None, customer=None, price=None):
     try:
-        await Tender.objects.aget(number=int(data[0]))
+        await Tender.objects.aget(number=int(number))
     except Tender.DoesNotExist:
-        start_date = datetime.strptime(data[1], "%d.%m.%Y").date()
-        end_date = datetime.strptime(data[2], "%d.%m.%Y").date()
-        await Tender.objects.acreate(number=int(data[0]), placement_date=start_date, end_date=end_date, name=data[3], price=float(data[5]))
+        start_date = datetime.strptime(placed, "%d.%m.%Y").date()
+        end_date = datetime.strptime(end_date, "%d.%m.%Y").date()
+        await Tender.objects.acreate(number=int(number), placement_date=start_date, end_date=end_date, name=object_to_buy, price=float(price), platform=customer)
 
 
 
@@ -88,7 +88,7 @@ async def get_info_from_each_header(header):
 
     if r is not None:
         
-        await save_tender_info_to_db(data=data)
+        await save_tender_info_to_db(number=num, placed=placed.text, end_date=end_date.text, object_to_buy=object_to_buy, customer=customer, price=price)
         soup = BeautifulSoup(r[0], 'html.parser')
 
         attachments = soup.find("div", {"class":"blockFilesTabDocs"})

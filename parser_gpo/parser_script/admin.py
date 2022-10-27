@@ -7,8 +7,6 @@ from .models import *
 
 admin.site.register(Report)
 
-admin.site.register(Platform)
-
 admin.site.register(FederalLaw)
 
 admin.site.register(Technology)
