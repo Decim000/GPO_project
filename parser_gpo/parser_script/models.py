@@ -6,14 +6,16 @@ from django.contrib.auth.models import AbstractUser
 
 class CustomUser(AbstractUser):
     company_name = models.CharField(max_length=250, blank=True)
+    phone_number = models.CharField(max_length=12, blank=True)
+    email = models.CharField(max_length=50, blank=True)
 
 
-class Platform(models.Model):
-    name = models.CharField(max_length=250)
-    URL = models.URLField()
+class KeyWords(models.Model):
+    keywords = models.CharField(max_length = 250, blank=True)
+    searcher = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
-        return self.name
+        return " ".join([self.keywords, self.searcher])
 
 
 class FederalLaw(models.Model):
@@ -43,7 +45,7 @@ class Tender(models.Model):
     name = models.CharField(max_length=250, default='---')
     tenderType = models.CharField(max_length=250, default='---')
     price = models.FloatField(default=0)
-    platform = models.ForeignKey(Platform, on_delete=models.SET_NULL, null=True)
+    platform = models.CharField(max_length=250, default='---', blank=True, null=True)
     purchase_stage = models.ForeignKey(PurchaseStage, on_delete=models.SET_NULL, null=True)
     placement_date = models.DateTimeField(default=now, blank=True)
     start_date = models.DateTimeField(default=now, blank=True)

@@ -47,15 +47,14 @@ async def get_doc(attachment_element, num):
     return doc_name
    
 
-async def save_tender_info_to_db(data:list):
+async def save_tender_info_to_db(number=None, placed=None, end_date=None, object_to_buy=None, customer=None, price=None):
     try:
-        tender = await Tender.objects.aget(number=int(data[0]))
+        await Tender.objects.aget(number=int(number))
     except Tender.DoesNotExist:
-        start_date = datetime.strptime(data[1], "%d.%m.%Y").date()
-        end_date = datetime.strptime(data[2], "%d.%m.%Y").date()
-        tender = await Tender.objects.acreate(number=int(data[0]), placement_date=start_date, end_date=end_date, name=data[3], price=float(data[5]))
+        start_date = datetime.strptime(placed, "%d.%m.%Y").date()
+        end_date = datetime.strptime(end_date, "%d.%m.%Y").date()
+        await Tender.objects.acreate(number=int(number), placement_date=start_date, end_date=end_date, name=object_to_buy, price=float(price), platform=customer)
 
-    return tender
 
 
 async def get_info_from_each_header(header):
@@ -89,13 +88,13 @@ async def get_info_from_each_header(header):
 
     if r is not None:
         
-        tender_object = await save_tender_info_to_db(data=data)
+        await save_tender_info_to_db(number=num, placed=placed.text, end_date=end_date.text, object_to_buy=object_to_buy, customer=customer, price=price)
         soup = BeautifulSoup(r[0], 'html.parser')
 
         attachments = soup.find("div", {"class":"blockFilesTabDocs"})
         if attachments is None:
             print(data)
-            return data
+            return num
 
         else:
             all_attachments = attachments.find_all("div", {"class": "attachment row"}) 
@@ -112,7 +111,7 @@ async def get_info_from_each_header(header):
                 data.append(doc)
        
     print(data)
-    return [data, tender_object]
+    return num
     
     
 
@@ -204,19 +203,34 @@ async def crawler(request):
                 sources = await asyncio.gather(*[get_html_async(url) for url in urls])
 
                 list(filter(lambda a: a != None, sources))
-                await asyncio.gather(*[get_items_list(source) for source in sources])
-            
-                return JsonResponse({'status': HTTPStatus.OK})
+                result = await asyncio.gather(*[get_items_list(source) for source in sources])
 
             else:
                 result = await get_items_list(r) 
 
-                if result:
-                    return JsonResponse({'status': HTTPStatus.OK})
-                else:
-                    return JsonResponse({'status': HTTPStatus.NO_CONTENT})
+            if result:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, unite_list, result)
+                print(result)
+                return JsonResponse({'status': HTTPStatus.OK})
+
+            else:
+                result = []
+                return JsonResponse({'status': HTTPStatus.NO_CONTENT})
 
     return JsonResponse({'status': HTTPStatus.BAD_REQUEST})
+
+
+def unite_list(original):
+    united_list = []
+    
+    for item in original:
+        if isinstance(item, list):
+            for nested_item in item:
+                united_list.append(nested_item)
+        else: 
+            united_list.append(item)
+    return united_list
 
 
 async def generate_url(body):
