@@ -15,7 +15,14 @@ from django.http import JsonResponse
 from .models import Tender
 
 
-async def download_async(title, number, href):
+async def download_async(title: str, number: str, href: str):
+    """ Downloads document in async way and saves it to media/docs/<num>
+
+    Args:
+        title (str): Title of the document
+        number (str): Number of the tender that document related to
+        href (str): URL for downloading document
+    """
     destination_folder = "media\docs\{}".format(number)
 
     if not os.path.exists(destination_folder):
@@ -25,17 +32,28 @@ async def download_async(title, number, href):
 
     if not os.path.exists(destination_file):
         r = await asyncio.gather(get_bytes_payload_async(href))
-        r = r[0]
-
-        if r:
+        try:
+            r = r[0]
             async with aiofiles.open(
                     destination_file, "wb"
             ) as outfile:
                 await outfile.write(r)
+        except Exception as e:
+            print(e)
 
 
-async def get_doc(attachment_element, num):
-    attachment_element = attachment_element.find("span", {"class": "section__value"})
+async def get_doc(attachment_element: BeautifulSoup, num: str):
+    """ Finds documents's name and starts downloading.
+
+    Args:
+        attachment_element (BeautifulSoup): Object where BS4 looks for title and URL
+        num (str): Number of the tender
+
+    Returns:
+        str: Full name of the document
+    """
+    attachment_element = attachment_element.find(
+        "span", {"class": "section__value"})
     attachment_element = attachment_element.find_next('a')
     doc_name = attachment_element['title']
     href = attachment_element['href']
@@ -46,8 +64,18 @@ async def get_doc(attachment_element, num):
     return doc_name
 
 
-async def save_tender_info_to_db(number=None, placed=None, end_date=None, object_to_buy=None, customer=None,
-                                 price=None):
+async def save_tender_info_to_db(number: str = None, placed: str = None, end_date: str = None, object_to_buy: str = None, customer: str = None,
+                                 price: str = None):
+    """ Saves the tender's collected info into database.
+
+    Args:
+        number (str, optional): Number of the tender. Defaults to None.
+        placed (str, optional): Tender's placement date. Defaults to None.
+        end_date (str, optional): Tender's end date. Defaults to None.
+        object_to_buy (str, optional): Full name of the tender. Defaults to None.
+        customer (str, optional): Full name of the customer. Defaults to None.
+        price (str, optional): Price of the tender. Defaults to None.
+    """
     try:
         await Tender.objects.aget(number=int(number))
     except Tender.DoesNotExist:
@@ -57,7 +85,16 @@ async def save_tender_info_to_db(number=None, placed=None, end_date=None, object
                                      name=object_to_buy, price=float(price), platform=customer)
 
 
-async def get_info_from_each_header(header):
+async def get_info_from_each_header(header: BeautifulSoup):
+    """ Collects info from header (object, number of the tender, price, placement date and end date) and extended page. 
+    Finds all attachments and starts their downloading.
+
+    Args:
+        header (BeautifulSoup): Object where BS4 looks for information to collect
+
+    Returns:
+        str: Number of the tender
+    """
     data = []
     url_base = "https://zakupki.gov.ru"
     num = header.find("div", {"class": "registry-entry__header-mid__number"})
@@ -81,7 +118,8 @@ async def get_info_from_each_header(header):
     docs = docs.find("a", {"target": "_blank"})
     link = docs.get('href')
 
-    data = [num, placed.text, end_date.text, object_to_buy, customer, price, link]
+    data = [num, placed.text, end_date.text,
+            object_to_buy, customer, price, link]
     doc_page = url_base + link
 
     r = await asyncio.gather(get_html_async(doc_page))
@@ -98,9 +136,12 @@ async def get_info_from_each_header(header):
             return num
 
         else:
-            all_attachments = attachments.find_all("div", {"class": "attachment row"})
-            attachments2 = attachments.find_all("div", {"class": "attachment row "})
-            attachments3 = attachments.find_all("div", {"class": "attachment row displayNone closedFilesDocs"})
+            all_attachments = attachments.find_all(
+                "div", {"class": "attachment row"})
+            attachments2 = attachments.find_all(
+                "div", {"class": "attachment row "})
+            attachments3 = attachments.find_all(
+                "div", {"class": "attachment row displayNone closedFilesDocs"})
             for att in attachments3:
                 all_attachments.append(att)
             for att in attachments2:
@@ -115,14 +156,31 @@ async def get_info_from_each_header(header):
     return num
 
 
-async def get_items_list(page_source):
+async def get_items_list(page_source: str):
+    """ Starts a search in each header and returns collected info about tenders numbers in list format. 
+
+    Args:
+        page_source (str): Page where the function will start search
+
+    Returns:
+        list: List of tenders numbers (str)
+    """
     soup = BeautifulSoup(page_source, 'html.parser')
-    coll = soup.find_all("div", {"class": "row no-gutters registry-entry__form mr-0"})
+    coll = soup.find_all(
+        "div", {"class": "row no-gutters registry-entry__form mr-0"})
     data_list = await asyncio.gather(*[get_info_from_each_header(header) for header in coll])
     return data_list
 
 
-async def get_html_async(test_url):
+async def get_html_async(test_url: str):
+    """ Function that returns the content of the page.
+
+    Args:
+        test_url (str): Page's URL
+
+    Returns:
+        str: Content of the page
+    """
     flag_success = False
     session = aiohttp.ClientSession(trust_env=True)
     while not flag_success:
@@ -135,7 +193,8 @@ async def get_html_async(test_url):
 
         except (ClientConnectorError, ClientConnectionError):
             retry_options = aiohttp_retry.ExponentialRetry(attempts=10)
-            retry_client = aiohttp_retry.RetryClient(session, retry_options=retry_options)
+            retry_client = aiohttp_retry.RetryClient(
+                session, retry_options=retry_options)
             try:
                 async with retry_client.get(test_url) as response:
                     text = await response.text()
@@ -150,7 +209,15 @@ async def get_html_async(test_url):
             print(e)
 
 
-async def get_bytes_payload_async(test_url):
+async def get_bytes_payload_async(test_url: str) -> bytes:
+    """ Sends request to the site and returns response payload in binary format using for downloading files.
+
+    Args:
+        test_url (str): URL where request will be send to
+
+    Returns:
+        bytes: Payload in binary format
+    """
     flag_success = False
     session = aiohttp.ClientSession(trust_env=True)
     while not flag_success:
@@ -164,7 +231,8 @@ async def get_bytes_payload_async(test_url):
 
         except (ClientConnectorError, ClientConnectionError):
             retry_options = aiohttp_retry.ExponentialRetry(attempts=10)
-            retry_client = aiohttp_retry.RetryClient(session, retry_options=retry_options)
+            retry_client = aiohttp_retry.RetryClient(
+                session, retry_options=retry_options)
             try:
                 async with retry_client.get(test_url) as response:
                     if response.status == 200:
@@ -174,11 +242,19 @@ async def get_bytes_payload_async(test_url):
                         return data
             except:
                 return None
-        except Exception as e:
-            print(e)
 
 
 async def crawler(request):
+    """ Crawler for zakupki.gov.ru
+
+    Crawler asynchronously sends requests to the site, searches for information and collects numbers of tenders in result.
+
+    Args:
+        request (HTTPRequest): Request sending from clients to the server
+
+    Returns:
+        JSONResponse: Currently returns HTTP-status according to found information
+    """
     if request.body:
         body = json.loads(request.body)
         url = await generate_url(body)
@@ -198,7 +274,8 @@ async def crawler(request):
                 last_page = list_items[-1].text
                 urls = [url]
                 for num in range(2, int(last_page) + 1):
-                    urls.append(url.replace("pageNumber={}".format(num - 1), "pageNumber={}".format(num)))
+                    urls.append(url.replace("pageNumber={}".format(
+                        num - 1), "pageNumber={}".format(num)))
                 sources = []
                 sources = await asyncio.gather(*[get_html_async(url) for url in urls])
 
@@ -221,7 +298,15 @@ async def crawler(request):
     return JsonResponse({'status': HTTPStatus.BAD_REQUEST})
 
 
-def unite_list(original):
+def unite_list(original: list):
+    """ Unites list of lists (one level) in single list.
+
+    Args:
+        original (list): List with nested list
+
+    Returns:
+        list: Single list without nested lists
+    """
     united_list = []
 
     for item in original:
@@ -233,7 +318,15 @@ def unite_list(original):
     return united_list
 
 
-async def generate_url(body):
+async def generate_url(body: dict):
+    """ Function that generates URL according to preferences for "zakupki.gov.ru" site.
+
+    Args:
+        body (dict): Dictionary with keywords, technologies, stage, law, price and date
+
+    Returns:
+        str: URL string
+    """
     keywords = body.get("search")
     technologies_list = body.get("technologies")
     unwanted_technologies_list = body.get("unwantedTechnologies")
@@ -274,6 +367,7 @@ async def generate_url(body):
     if end_date != "":
         date_url += "&applSubmissionCloseDateFrom=" + str(end_date)
 
-    generated_url = basic_url + search_url + keywords + url_tail + law_url + stage_url + price_url + date_url
+    generated_url = basic_url + search_url + keywords + \
+        url_tail + law_url + stage_url + price_url + date_url
 
     return generated_url
