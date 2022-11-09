@@ -13,8 +13,9 @@ from aiohttp import ClientConnectorError, ClientConnectionError
 from bs4 import BeautifulSoup
 from django.http import JsonResponse
 from django.core.files.base import ContentFile
+from asgiref.sync import sync_to_async
 
-from .models import Tender, TenderDocument
+from .models import PurchaseStage, SupplierDefinition, Tender, TenderDocument
 
 
 async def download_async(title: str, number: str, href: str):
@@ -51,17 +52,19 @@ async def download_async(title: str, number: str, href: str):
                 print(e)
 
 
-async def get_extra_info(extended_info_link):
+async def get_extra_info(extended_info_link: str, num: str, url_base: str):
     """ Searches for extra info for Tender and saves it.
 
     Args:
-        extended_info_link (str): URL for page with extended info
+        extended_info_link (str): Part of the URL for page with extended info
+        num (str): Unique number of the tender
+        url_base (str): Basic domain for the site
     """
-    page = await get_html_async(extended_info_link)
-
+    page = await get_html_async(url_base+extended_info_link)
     soup = BeautifulSoup(page, 'html.parser')
-    soup.find("div", {"class": "cardHeaderBlock"})
-    soup.find_next()
+    soup = soup.find("div", {"class": "cardWrapper outerWrapper"})
+    soup = soup.find("div", {"class": "cardHeaderBlock"})
+    soup = soup.find_next_sibling()
     sections = soup.find_all(
         "section", {"class": "blockInfo__section section"})
     supplier = sections[0].find("span", {"class": "section__info"})
@@ -73,7 +76,8 @@ async def get_extra_info(extended_info_link):
     stage = sections[5].find("span", {"class": "section__info"})
     stage = stage.text
 
-    await save_tender_info_to_db(platform_url=platform_url, platform_name=platform, supplier=supplier, stage=stage)
+    print(supplier)
+    # await save_tender_info_to_db(number=num, platform_url=platform_url, platform_name=platform, supplier=supplier, stage=stage)
 
 
 async def get_doc(attachment_element: BeautifulSoup, num: str):
@@ -99,8 +103,8 @@ async def get_doc(attachment_element: BeautifulSoup, num: str):
 
 
 async def save_tender_info_to_db(number: str = None, placed: str = None, end_date: str = None, object_to_buy: str = None, customer: str = None,
-                                 price: str = None, platform_name=None, platform_url=None, supplier=None, stage=None):
-    """ Saves the tender's collected info into database.
+                                 price: str = None, platform_name: str = None, platform_url: str = None, supplier: str = None, stage: str = None):
+    """ Saves the tender's collected info into database in two steps. If tender exists, updates the fields. If not, creates with basic info.
 
     Args:
         number (str, optional): Number of the tender. Defaults to None.
@@ -109,9 +113,22 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
         object_to_buy (str, optional): Full name of the tender. Defaults to None.
         customer (str, optional): Full name of the customer. Defaults to None.
         price (str, optional): Price of the tender. Defaults to None.
+        platform_name (str, optional): Name of the platform where tender is placed. Defaults to None.
+        platform_url (str, optional): URL link to platform's official site. Defaults to None.
+        supplier (str, optional): Method to define supplier. Defaults to None.
+        stage (str, optional): Purchase stage of the tender. Defaults to None.
     """
     try:
-        await Tender.objects.aget(number=number)
+        tender = await Tender.objects.aget(number=number)
+        if platform_name is not None:
+            purchase_stage = await PurchaseStage.objects.aget(name=stage)
+            supplier_method = await SupplierDefinition.objects.aget(supplier_definition_name=supplier)
+
+            tender.platform = platform_name
+            tender.platform_URL = platform_url
+            tender.supplier_definition = supplier_method
+            tender.purchase_stage = purchase_stage
+            await sync_to_async(tender.save)()
 
     except Tender.DoesNotExist:
         start_date = datetime.strptime(placed, "%d.%m.%Y").date()
@@ -166,7 +183,8 @@ async def get_info_from_each_header(header: BeautifulSoup):
 
         await save_tender_info_to_db(number=num, placed=placed.text, end_date=end_date.text,
                                      object_to_buy=object_to_buy, customer=customer, price=price)
-        # await get_extra_info(extended_info_link)
+        #print(url_base, extended_info_link)
+        await get_extra_info(extended_info_link, num, url_base)
         soup = BeautifulSoup(r[0], 'html.parser')
 
         attachments = soup.find("div", {"class": "blockFilesTabDocs"})

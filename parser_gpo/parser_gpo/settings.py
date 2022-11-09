@@ -49,7 +49,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -140,7 +139,7 @@ STATICFILES_DIRS = (
 )
 
 
-db_from_env = dj_database_url.config()
+""" db_from_env = dj_database_url.config()
 DATABASES['default'].update(db_from_env)
 
-django_heroku.settings(locals())
+django_heroku.settings(locals()) """
