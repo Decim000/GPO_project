@@ -1,0 +1,1 @@
+web: gunicorn parser_gpo.wsgi
