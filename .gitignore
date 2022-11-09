@@ -1,3 +1,4 @@
 env/
 parser_gpo/db.sqlite3
 parser_gpo/media/docs/
+.vscode/

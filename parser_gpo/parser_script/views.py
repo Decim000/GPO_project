@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import os
 from datetime import datetime
@@ -11,8 +12,9 @@ import unicodedata
 from aiohttp import ClientConnectorError, ClientConnectionError
 from bs4 import BeautifulSoup
 from django.http import JsonResponse
+from django.core.files.base import ContentFile
 
-from .models import Tender
+from .models import Tender, TenderDocument
 
 
 async def download_async(title: str, number: str, href: str):
@@ -20,7 +22,7 @@ async def download_async(title: str, number: str, href: str):
 
     Args:
         title (str): Title of the document
-        number (str): Number of the tender that document related to
+        number (str): Number of the tender that document is related to
         href (str): URL for downloading document
     """
     destination_folder = "media\docs\{}".format(number)
@@ -30,16 +32,48 @@ async def download_async(title: str, number: str, href: str):
 
     destination_file = destination_folder + "/{}".format(title)
 
-    if not os.path.exists(destination_file):
-        r = await asyncio.gather(get_bytes_payload_async(href))
-        try:
-            r = r[0]
-            async with aiofiles.open(
+    tender_object = await Tender.objects.aget(number=number)
+    try:
+        doc = await TenderDocument.objects.aget(tender=tender_object, title=title)
+    except TenderDocument.DoesNotExist:
+        if not os.path.exists(destination_file):
+            r = await asyncio.gather(get_bytes_payload_async(href))
+            try:
+                r = r[0]
+                """ async with aiofiles.open(
                     destination_file, "wb"
-            ) as outfile:
-                await outfile.write(r)
-        except Exception as e:
-            print(e)
+                ) as outfile:
+                await outfile.write(r) """
+                file = ContentFile(r, title)
+
+                await TenderDocument.objects.acreate(document=file, tender=tender_object, title=title)
+            except Exception as e:
+                print(e)
+
+
+async def get_extra_info(extended_info_link):
+    """ Searches for extra info for Tender and saves it.
+
+    Args:
+        extended_info_link (str): URL for page with extended info
+    """
+    page = await get_html_async(extended_info_link)
+
+    soup = BeautifulSoup(page, 'html.parser')
+    soup.find("div", {"class": "cardHeaderBlock"})
+    soup.find_next()
+    sections = soup.find_all(
+        "section", {"class": "blockInfo__section section"})
+    supplier = sections[0].find("span", {"class": "section__info"})
+    supplier = supplier.text
+    platform = sections[1].find("span", {"class": "section__info"})
+    platform = platform.text
+    platform_url = sections[2].find("span", {"class": "section__info"})
+    platform_url = platform_url.text.strip()
+    stage = sections[5].find("span", {"class": "section__info"})
+    stage = stage.text
+
+    await save_tender_info_to_db(platform_url=platform_url, platform_name=platform, supplier=supplier, stage=stage)
 
 
 async def get_doc(attachment_element: BeautifulSoup, num: str):
@@ -65,7 +99,7 @@ async def get_doc(attachment_element: BeautifulSoup, num: str):
 
 
 async def save_tender_info_to_db(number: str = None, placed: str = None, end_date: str = None, object_to_buy: str = None, customer: str = None,
-                                 price: str = None):
+                                 price: str = None, platform_name=None, platform_url=None, supplier=None, stage=None):
     """ Saves the tender's collected info into database.
 
     Args:
@@ -77,12 +111,13 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
         price (str, optional): Price of the tender. Defaults to None.
     """
     try:
-        await Tender.objects.aget(number=int(number))
+        await Tender.objects.aget(number=number)
+
     except Tender.DoesNotExist:
         start_date = datetime.strptime(placed, "%d.%m.%Y").date()
         end_date = datetime.strptime(end_date, "%d.%m.%Y").date()
-        await Tender.objects.acreate(number=int(number), placement_date=start_date, end_date=end_date,
-                                     name=object_to_buy, price=float(price), platform=customer)
+        await Tender.objects.acreate(number=number, placement_date=start_date, end_date=end_date,
+                                     name=object_to_buy, price=float(price), tenderType=customer)
 
 
 async def get_info_from_each_header(header: BeautifulSoup):
@@ -95,9 +130,12 @@ async def get_info_from_each_header(header: BeautifulSoup):
     Returns:
         str: Number of the tender
     """
+
     data = []
     url_base = "https://zakupki.gov.ru"
     num = header.find("div", {"class": "registry-entry__header-mid__number"})
+    extended_info_link = num.find("a", {"target": "_blank"})
+    extended_info_link = extended_info_link.get('href')
     num = num.text.strip()
     num = num.replace("№ ", "")
     object_to_buy = header.find("div", {"class": "registry-entry__body-value"})
@@ -128,6 +166,7 @@ async def get_info_from_each_header(header: BeautifulSoup):
 
         await save_tender_info_to_db(number=num, placed=placed.text, end_date=end_date.text,
                                      object_to_buy=object_to_buy, customer=customer, price=price)
+        # await get_extra_info(extended_info_link)
         soup = BeautifulSoup(r[0], 'html.parser')
 
         attachments = soup.find("div", {"class": "blockFilesTabDocs"})
@@ -352,11 +391,11 @@ async def generate_url(body: dict):
         stage_url += "&af=on"
 
     min_price = price_dict.get('minPrice')
-    if min_price is not None:
+    if min_price is not None and min_price != "":
         price_url += "&priceFromGeneral=" + str(min_price)
 
     max_price = price_dict.get('maxPrice')
-    if max_price != 0:
+    if max_price is not None and max_price != 0:
         price_url += "&priceToGeneral=" + str(max_price)
 
     start_date = date_dict.get('beginDate')
