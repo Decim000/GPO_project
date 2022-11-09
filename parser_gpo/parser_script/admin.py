@@ -15,12 +15,6 @@ admin.site.register(PurchaseStage)
 
 admin.site.register(Tender)
 
-admin.site.register(KeyWords)
-
-admin.site.register(SupplierDefinition)
-
-admin.site.register(TenderDocument)
-
 
 class CustomUserAdmin(UserAdmin):
     list_display = (
