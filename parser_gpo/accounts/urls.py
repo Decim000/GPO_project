@@ -1,17 +1,25 @@
 from django.contrib import admin
-from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
-
-from .views import RegisterView, ChangePasswordView, UpdateProfileView, LogoutView, LogoutAllView
+from django.urls import path, include
 
 urlpatterns = [
-    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('login/verify/', TokenVerifyView.as_view(), name='token_verify'),
-    path('register/', RegisterView.as_view(), name='auth_register'),
-    path('change_password/<int:pk>/', ChangePasswordView.as_view(), name='auth_change_password'),
-    path('update_profile/<int:pk>/', UpdateProfileView.as_view(), name='auth_update_profile'),
-    path('logout/', LogoutView.as_view(), name='auth_logout'),
-    path('logout_all/', LogoutAllView.as_view(), name='auth_logout_all'),
+    path('auth/', include('djoser.urls')),
+    path('auth/', include('djoser.urls.jwt')),
 
+    #Регистрация
+    #http://127.0.0.1:8000/auth/users/
+
+    #Подтверждение почты
+    #http://127.0.0.1:8000/auth/users/activation/
+
+    #Вход по JWT
+    #http://127.0.0.1:8000/auth/jwt/create/
+
+    #Обновление токена
+    #http://127.0.0.1:8000/auth/jwt/refresh/
+
+    #Email для смены пароля
+    #http://127.0.0.1:8000/auth/users/reset_password/
+
+    #Смена пароля по токену из Email
+    #http://127.0.0.1:8000/auth/users/reset_password_confirm/
 ]
