@@ -17,7 +17,7 @@ from asgiref.sync import sync_to_async
 from .models import PurchaseStage, SupplierDefinition, Tender, TenderDocument
 
 
-async def download_async(title, number, href):
+async def download_async(title: str, number: str, href: str):
     """ Downloads document in async way and saves it to media/docs/<num>
 
     Args:
@@ -32,15 +32,23 @@ async def download_async(title, number, href):
 
     destination_file = destination_folder + "/{}".format(title)
 
-    if not os.path.exists(destination_file):
-        r = await asyncio.gather(get_bytes_payload_async(href))
-        r = r[0]
-
-        if r:
-            async with aiofiles.open(
+    tender_object = await Tender.objects.aget(number=number)
+    try:
+        doc = await TenderDocument.objects.aget(tender=tender_object, title=title)
+    except TenderDocument.DoesNotExist:
+        if not os.path.exists(destination_file):
+            r = await asyncio.gather(get_bytes_payload_async(href))
+            try:
+                r = r[0]
+                """ async with aiofiles.open(
                     destination_file, "wb"
-            ) as outfile:
-                await outfile.write(r)
+                ) as outfile:
+                await outfile.write(r) """
+                file = ContentFile(r, title)
+
+                await TenderDocument.objects.acreate(document=file, tender=tender_object, title=title)
+            except Exception as e:
+                print(e)
 
 
 async def get_extra_info(extended_info_link: str, num: str, url_base: str):
@@ -112,8 +120,14 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
     try:
         tender = await Tender.objects.aget(number=number)
         if platform_name is not None:
-            purchase_stage = await PurchaseStage.objects.aget(name=stage)
-            supplier_method = await SupplierDefinition.objects.aget(supplier_definition_name=supplier)
+            try:
+                purchase_stage = await PurchaseStage.objects.aget(name=stage)
+            except:
+                purchase_stage = await PurchaseStage.objects.acreate(name=stage)
+            try:
+                supplier_method = await SupplierDefinition.objects.aget(supplier_definition_name=supplier)
+            except:
+                supplier_method = await SupplierDefinition.objects.acreate(supplier_definition_name=supplier)
 
             tender.platform = platform_name
             tender.platform_URL = platform_url
@@ -124,11 +138,11 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
     except Tender.DoesNotExist:
         start_date = datetime.strptime(placed, "%d.%m.%Y").date()
         end_date = datetime.strptime(end_date, "%d.%m.%Y").date()
-        await Tender.objects.acreate(number=int(number), placement_date=start_date, end_date=end_date,
-                                     name=object_to_buy, price=float(price), platform=customer)
+        await Tender.objects.acreate(number=number, placement_date=start_date, end_date=end_date,
+                                     name=object_to_buy, price=float(price), tenderType=customer)
 
 
-async def get_info_from_each_header(header):
+async def get_info_from_each_header(header: BeautifulSoup):
     """ Collects info from header (object, number of the tender, price, placement date and end date) and extended page. 
     Finds all attachments and starts their downloading.
 
