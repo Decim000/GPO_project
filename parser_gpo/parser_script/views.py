@@ -1,5 +1,4 @@
 import asyncio
-import io
 import json
 import os
 from datetime import datetime
@@ -18,7 +17,7 @@ from asgiref.sync import sync_to_async
 from .models import PurchaseStage, SupplierDefinition, Tender, TenderDocument
 
 
-async def download_async(title: str, number: str, href: str):
+async def download_async(title, number, href):
     """ Downloads document in async way and saves it to media/docs/<num>
 
     Args:
@@ -33,23 +32,15 @@ async def download_async(title: str, number: str, href: str):
 
     destination_file = destination_folder + "/{}".format(title)
 
-    tender_object = await Tender.objects.aget(number=number)
-    try:
-        doc = await TenderDocument.objects.aget(tender=tender_object, title=title)
-    except TenderDocument.DoesNotExist:
-        if not os.path.exists(destination_file):
-            r = await asyncio.gather(get_bytes_payload_async(href))
-            try:
-                r = r[0]
-                """ async with aiofiles.open(
-                    destination_file, "wb"
-                ) as outfile:
-                await outfile.write(r) """
-                file = ContentFile(r, title)
+    if not os.path.exists(destination_file):
+        r = await asyncio.gather(get_bytes_payload_async(href))
+        r = r[0]
 
-                await TenderDocument.objects.acreate(document=file, tender=tender_object, title=title)
-            except Exception as e:
-                print(e)
+        if r:
+            async with aiofiles.open(
+                    destination_file, "wb"
+            ) as outfile:
+                await outfile.write(r)
 
 
 async def get_extra_info(extended_info_link: str, num: str, url_base: str):
@@ -77,7 +68,7 @@ async def get_extra_info(extended_info_link: str, num: str, url_base: str):
     stage = stage.text
 
     print(supplier)
-    # await save_tender_info_to_db(number=num, platform_url=platform_url, platform_name=platform, supplier=supplier, stage=stage)
+    await save_tender_info_to_db(number=num, platform_url=platform_url, platform_name=platform, supplier=supplier, stage=stage)
 
 
 async def get_doc(attachment_element: BeautifulSoup, num: str):
@@ -133,11 +124,11 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
     except Tender.DoesNotExist:
         start_date = datetime.strptime(placed, "%d.%m.%Y").date()
         end_date = datetime.strptime(end_date, "%d.%m.%Y").date()
-        await Tender.objects.acreate(number=number, placement_date=start_date, end_date=end_date,
-                                     name=object_to_buy, price=float(price), tenderType=customer)
+        await Tender.objects.acreate(number=int(number), placement_date=start_date, end_date=end_date,
+                                     name=object_to_buy, price=float(price), platform=customer)
 
 
-async def get_info_from_each_header(header: BeautifulSoup):
+async def get_info_from_each_header(header):
     """ Collects info from header (object, number of the tender, price, placement date and end date) and extended page. 
     Finds all attachments and starts their downloading.
 
@@ -213,7 +204,7 @@ async def get_info_from_each_header(header: BeautifulSoup):
     return num
 
 
-async def get_items_list(page_source: str):
+async def get_items_list(page_source):
     """ Starts a search in each header and returns collected info about tenders numbers in list format. 
 
     Args:
@@ -229,7 +220,7 @@ async def get_items_list(page_source: str):
     return data_list
 
 
-async def get_html_async(test_url: str):
+async def get_html_async(test_url):
     """ Function that returns the content of the page.
 
     Args:
@@ -266,7 +257,7 @@ async def get_html_async(test_url: str):
             print(e)
 
 
-async def get_bytes_payload_async(test_url: str) -> bytes:
+async def get_bytes_payload_async(test_url):
     """ Sends request to the site and returns response payload in binary format using for downloading files.
 
     Args:
@@ -299,6 +290,8 @@ async def get_bytes_payload_async(test_url: str) -> bytes:
                         return data
             except:
                 return None
+        except Exception as e:
+            print(e)
 
 
 async def crawler(request):
@@ -355,7 +348,7 @@ async def crawler(request):
     return JsonResponse({'status': HTTPStatus.BAD_REQUEST})
 
 
-def unite_list(original: list):
+def unite_list(original):
     """ Unites list of lists (one level) in single list.
 
     Args:
@@ -375,7 +368,7 @@ def unite_list(original: list):
     return united_list
 
 
-async def generate_url(body: dict):
+async def generate_url(body):
     """ Function that generates URL according to preferences for "zakupki.gov.ru" site.
 
     Args:
@@ -409,11 +402,11 @@ async def generate_url(body: dict):
         stage_url += "&af=on"
 
     min_price = price_dict.get('minPrice')
-    if min_price is not None and min_price != "":
+    if min_price is not None:
         price_url += "&priceFromGeneral=" + str(min_price)
 
     max_price = price_dict.get('maxPrice')
-    if max_price is not None and max_price != 0:
+    if max_price != 0:
         price_url += "&priceToGeneral=" + str(max_price)
 
     start_date = date_dict.get('beginDate')
