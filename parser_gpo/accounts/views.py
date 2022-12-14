@@ -1,4 +1,3 @@
-from django.shortcuts import render
 from rest_framework import mixins, viewsets, permissions
 
 from accounts.models import Profile
@@ -13,5 +12,4 @@ class ProfileViewSet(mixins.ListModelMixin,
 
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,
-                          IsOwnerOrReadOnly, )
+    permission_classes = (permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly, )

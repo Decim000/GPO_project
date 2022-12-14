@@ -26,6 +26,9 @@ class Profile(models.Model):
     about_you = models.CharField(max_length=255, blank=True, default='')
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE)
 
+    def __str__(self):
+        return self.user.username
+
     @receiver(post_save, sender=CustomUser)
     def create_user_profile(sender, instance, created, **kwargs):
         if created:
