@@ -1,3 +1,4 @@
+import json
 from django.utils.timezone import now
 from email.policy import default
 from django.db import models
@@ -5,12 +6,12 @@ from accounts.models import CustomUser
 
 
 class KeyWords(models.Model):
-    keywords = models.CharField(max_length=250, blank=True)
+    keywords = models.JSONField(blank=True, null=True)
     searcher = models.ForeignKey(
         CustomUser, on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
-        return " ".join([self.keywords, self.searcher])
+        return " ".join([str(self.pk)])
 
 
 class FederalLaw(models.Model):

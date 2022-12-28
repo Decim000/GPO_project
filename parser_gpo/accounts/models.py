@@ -17,8 +17,9 @@ class CustomUser(AbstractUser):
         return self.first_name
 
     def __str__(self):
-        return self.email
+        return str(self.id)
 
 
 class Profile(models.Model):
-    user = models.OneToOneField(CustomUser, null=True, on_delete=models.CASCADE)
+    user = models.OneToOneField(
+        CustomUser, null=True, on_delete=models.CASCADE)

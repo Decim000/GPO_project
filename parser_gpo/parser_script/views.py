@@ -1,3 +1,7 @@
+from rest_framework.decorators import permission_classes
+from rest_framework.permissions import IsAuthenticated
+from django.http import HttpRequest
+import time
 import asyncio
 import json
 import os
@@ -13,8 +17,9 @@ from bs4 import BeautifulSoup
 from django.http import JsonResponse
 from django.core.files.base import ContentFile
 from asgiref.sync import sync_to_async
-
-from .models import PurchaseStage, SupplierDefinition, Tender, TenderDocument
+from rest_framework_simplejwt.tokens import AccessToken
+from accounts.models import CustomUser
+from .models import KeyWords, PurchaseStage, SupplierDefinition, Tender, TenderDocument
 
 
 async def download_async(title: str, number: str, href: str):
@@ -32,21 +37,17 @@ async def download_async(title: str, number: str, href: str):
 
     destination_file = destination_folder + "/{}".format(title)
 
-    tender_object = await Tender.objects.aget(number=number)
+    tender_object = await sync_to_async(Tender.objects.get)(number=number)
     try:
-        doc = await TenderDocument.objects.aget(tender=tender_object, title=title)
+        doc = await sync_to_async(TenderDocument.objects.get)(tender=tender_object, title=title)
     except TenderDocument.DoesNotExist:
         if not os.path.exists(destination_file):
             r = await asyncio.gather(get_bytes_payload_async(href))
             try:
                 r = r[0]
-                """ async with aiofiles.open(
-                    destination_file, "wb"
-                ) as outfile:
-                await outfile.write(r) """
                 file = ContentFile(r, title)
 
-                await TenderDocument.objects.acreate(document=file, tender=tender_object, title=title)
+                await sync_to_async(TenderDocument.objects.create)(document=file, tender=tender_object, title=title)
             except Exception as e:
                 print(e)
 
@@ -118,16 +119,16 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
         stage (str, optional): Purchase stage of the tender. Defaults to None.
     """
     try:
-        tender = await Tender.objects.aget(number=number)
+        tender = await sync_to_async(Tender.objects.get)(number=number)
         if platform_name is not None:
             try:
-                purchase_stage = await PurchaseStage.objects.aget(name=stage)
+                purchase_stage = await sync_to_async(PurchaseStage.objects.get)(name=stage)
             except:
-                purchase_stage = await PurchaseStage.objects.acreate(name=stage)
+                purchase_stage = await sync_to_async(PurchaseStage.objects.create)(name=stage)
             try:
-                supplier_method = await SupplierDefinition.objects.aget(supplier_definition_name=supplier)
+                supplier_method = await sync_to_async(SupplierDefinition.objects.get)(supplier_definition_name=supplier)
             except:
-                supplier_method = await SupplierDefinition.objects.acreate(supplier_definition_name=supplier)
+                supplier_method = await sync_to_async(SupplierDefinition.objects.create)(supplier_definition_name=supplier)
 
             tender.platform = platform_name
             tender.platform_URL = platform_url
@@ -138,8 +139,8 @@ async def save_tender_info_to_db(number: str = None, placed: str = None, end_dat
     except Tender.DoesNotExist:
         start_date = datetime.strptime(placed, "%d.%m.%Y").date()
         end_date = datetime.strptime(end_date, "%d.%m.%Y").date()
-        await Tender.objects.acreate(number=number, placement_date=start_date, end_date=end_date,
-                                     name=object_to_buy, price=float(price), tenderType=customer)
+        await sync_to_async(Tender.objects.create)(number=number, placement_date=start_date, end_date=end_date,
+                                                   name=object_to_buy, price=float(price), tenderType=customer)
 
 
 async def get_info_from_each_header(header: BeautifulSoup):
@@ -319,9 +320,18 @@ async def crawler(request):
     Returns:
         JSONResponse: Currently returns HTTP-status according to found information
     """
-    if request.body:
-        body = json.loads(request.body)
-        url = await generate_url(body)
+    try:
+        jwt_token_str = request.headers['Authorization']
+        access_token = AccessToken(token=jwt_token_str)
+        user = await sync_to_async(CustomUser.objects.get)(pk=access_token.get('user_id'))
+
+    except:
+        return JsonResponse({'status': HTTPStatus.UNAUTHORIZED})
+
+    if user and request.body:
+        await save_keywords(request=request, user=user)
+
+        url = await generate_url(request=request)
         print(url)
 
         r = await asyncio.gather(get_html_async(url))
@@ -362,7 +372,7 @@ async def crawler(request):
     return JsonResponse({'status': HTTPStatus.BAD_REQUEST})
 
 
-def unite_list(original):
+def unite_list(original_list: list):
     """ Unites list of lists (one level) in single list.
 
     Args:
@@ -373,7 +383,7 @@ def unite_list(original):
     """
     united_list = []
 
-    for item in original:
+    for item in original_list:
         if isinstance(item, list):
             for nested_item in item:
                 united_list.append(nested_item)
@@ -382,7 +392,7 @@ def unite_list(original):
     return united_list
 
 
-async def generate_url(body):
+async def generate_url(request: HttpRequest):
     """ Function that generates URL according to preferences for "zakupki.gov.ru" site.
 
     Args:
@@ -391,9 +401,9 @@ async def generate_url(body):
     Returns:
         str: URL string
     """
+    body = json.loads(request.body)
     keywords = body.get("search")
-    technologies_list = body.get("technologies")
-    unwanted_technologies_list = body.get("unwantedTechnologies")
+
     stage = body.get("purchaseStage")
     law_type_list = body.get("federalLaw")
     price_dict = body.get("price")
@@ -435,3 +445,21 @@ async def generate_url(body):
         url_tail + law_url + stage_url + price_url + date_url
 
     return generated_url
+
+
+async def save_keywords(request: HttpRequest, user: CustomUser):
+    """Saves user's keywords containing in request. 
+
+    Extract user's ID from token information from headers and preferences from request's body. Uses CustomUser's object 
+    and preferences in JSON format to store KeyWords object.
+
+    Args:
+        request (HttpRequest): Original request with all necessary info.
+        user (CustomUser): CustomUser's object corresponding to user. 
+    """
+
+    body = json.loads(request.body)
+    technologies_list = body.get("technologies")
+    unwanted_technologies_list = body.get("unwantedTechnologies")
+
+    await sync_to_async(KeyWords.objects.create)(searcher=user, keywords={'tech_on': technologies_list, 'tech_off': unwanted_technologies_list})

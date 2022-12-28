@@ -1,6 +1,7 @@
 .idea/
 venv/
 env/
+nenv/
 parser_gpo/db.sqlite3
 parser_gpo/media/docs/
 .vscode/
