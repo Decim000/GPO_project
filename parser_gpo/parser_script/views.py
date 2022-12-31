@@ -1,3 +1,5 @@
+from rest_framework.decorators import api_view
+from django.contrib.auth.decorators import login_required
 from rest_framework.decorators import permission_classes
 from rest_framework.permissions import IsAuthenticated
 from django.http import HttpRequest
@@ -309,7 +311,8 @@ async def get_bytes_payload_async(test_url):
             print(e)
 
 
-async def crawler(request):
+@permission_classes((IsAuthenticated, ))
+async def crawler(request, format=None):
     """ Crawler for zakupki.gov.ru
 
     Crawler asynchronously sends requests to the site, searches for information and collects numbers of tenders in result.
@@ -320,15 +323,11 @@ async def crawler(request):
     Returns:
         JSONResponse: Currently returns HTTP-status according to found information
     """
-    try:
+
+    if request.body:
         jwt_token_str = request.headers['Authorization']
-        access_token = AccessToken(token=jwt_token_str)
-        user = await sync_to_async(CustomUser.objects.get)(pk=access_token.get('user_id'))
-
-    except:
-        return JsonResponse({'status': HTTPStatus.UNAUTHORIZED})
-
-    if user and request.body:
+        acces_token = AccessToken(token=jwt_token_str)
+        user = await sync_to_async(CustomUser.objects.get)(pk=acces_token.get('user_id'))
         await save_keywords(request=request, user=user)
 
         url = await generate_url(request=request)
